@@ -33,11 +33,6 @@ from nrc_engine import NRCEngine
 from biophysics import BiophysicsSuite
 from reporting import ReportingSuite
 from deposition import depositor
-try:
-    from local_esmfold import esm_folder
-    LOCAL_ESM_AVAILABLE = True
-except ImportError:
-    LOCAL_ESM_AVAILABLE = False
 
 engine = NRCEngine()
 
@@ -257,20 +252,6 @@ def get_viewer_html(pdb_str, engine_type="Three.js", pockets=None):
     </script>
     """
 
-def query_esmfold(sequence):
-    """Queries the ESMFold-v1 API for zero-shot protein structure prediction."""
-    token = os.getenv("HF_TOKEN")
-    headers = {"Authorization": f"Bearer {token}"} if token else {}
-    api_url = "https://api-inference.huggingface.co/models/facebook/esmfold-v1"
-    
-    try:
-        response = requests.post(api_url, headers=headers, json={"inputs": sequence}, timeout=60)
-        if response.status_code == 200:
-            return response.text
-        return None
-    except Exception:
-        return None
-
 def parse_pdb_coords(pdb_str):
     """Extracts C-alpha coordinates and pLDDT from a PDB string."""
     coords = []
@@ -289,7 +270,7 @@ def parse_pdb_coords(pdb_str):
     return np.array(coords), np.array(plddt)
 
 def run_nrc_pipeline(seq, viewer_type, folding_mode, ref_pdb_id=None):
-    logs = [f"[{datetime.now().strftime('%H:%M:%S')}] INITIALIZING {folding_mode.upper()} PIPELINE..."]
+    logs = [f"[{datetime.now().strftime('%H:%M:%S')}] INITIALIZING PURE NRC DETERMINISTIC PIPELINE..."]
     yield ["\n".join(logs)] + [None]*15
     
     try:
@@ -298,66 +279,35 @@ def run_nrc_pipeline(seq, viewer_type, folding_mode, ref_pdb_id=None):
             yield ["[ERROR] EMPTY SEQUENCE"] + [None]*15
             return
         
-        coords = None
-        confidence = None
-        templates = None
-        
-        if folding_mode in ["ESMFold (Physical Model)", "Hybrid (AI Seed + NRC)", "Local ESMFold (Standard)"]:
-            if folding_mode == "Local ESMFold (Standard)" and LOCAL_ESM_AVAILABLE:
-                logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] INITIATING LOCAL ESMFOLD INFERENCE (CUDA Accelerated)...")
-                yield ["\n".join(logs)] + [None]*15
-                esm_pdb = esm_folder.predict(seq)
-            else:
-                logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] QUERYING ESMFOLD API (Hugging Face Manifold)...")
-                yield ["\n".join(logs)] + [None]*15
-                esm_pdb = query_esmfold(seq)
-            
-            if esm_pdb:
-                esm_coords, esm_plddt = parse_pdb_coords(esm_pdb)
-                if len(esm_coords) == len(seq):
-                    logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] ESMFOLD DATA ACQUIRED. Resonance Sync Success.")
-                    if folding_mode in ["ESMFold (Physical Model)", "Local ESMFold (Standard)"]:
-                        coords = esm_coords
-                        confidence = esm_plddt
-                    else:
-                        logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] INTEGRATING AI SEED INTO NRC LATTICE (Hybrid Projection)...")
-                        templates = {i: c for i, c in enumerate(esm_coords)}
-                else:
-                    logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] [WARN] ESMFOLD MISMATCH ({len(esm_coords)} vs {len(seq)}). FALLING BACK TO NRC GEOMETRIC INIT.")
-            else:
-                logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] [WARN] ESMFOLD API LIMIT OR OFFLINE. FALLING BACK TO NRC GEOMETRIC INIT.")
-            yield ["\n".join(logs)] + [None]*15
-
-        # Run NRC Math Engine (as primary or refinement)
+        # Pure NRC Math Engine
         all_atom_data = {}
-        if coords is None:
-            logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] INITIATING PHI-LATTICE FOLDING ENGINE...")
-            for frame in engine.fold_sequence(seq, templates=templates):
-                coords = frame["coords"]
-                confidence = frame["confidence"]
-                
-                step = frame["step"]
-                if step == 1:
-                    logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] STAGE 1: CA-SKELETON GLOBAL RESONANCE OPTIMIZATION")
-                elif step == 16:
-                    logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] STAGE 2: COARSE PACKING & BACKBONE COVARIANCE")
-                elif step == 26:
-                    logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] STAGE 3: ULTIMATE ALL-ATOM RESONANT FINALIZATION")
+        logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] INITIATING PHI-LATTICE FOLDING ENGINE...")
+        for frame in engine.fold_sequence(seq):
+            coords = frame["coords"]
+            confidence = frame["confidence"]
+            step = frame["step"]
+            
+            if step == 1:
+                logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] STAGE 1: CA-SKELETON GLOBAL RESONANCE OPTIMIZATION")
+            elif step == 16:
+                logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] STAGE 2: COARSE PACKING & BACKBONE COVARIANCE")
+            elif step == 26:
+                logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] STAGE 3: ULTIMATE ALL-ATOM RESONANT FINALIZATION")
 
-                if frame.get("all_atom"):
-                    all_atom_data = {
-                        "all_atom": True,
-                        "atom_types": frame.get("atom_types"),
-                        "res_indices": frame.get("res_indices"),
-                        "res_names": frame.get("res_names")
-                    }
+            if frame.get("all_atom"):
+                all_atom_data = {
+                    "all_atom": True,
+                    "atom_types": frame.get("atom_types"),
+                    "res_indices": frame.get("res_indices"),
+                    "res_names": frame.get("res_names")
+                }
 
-                # Yield progress updates to UI
-                if not frame.get("final", False):
-                    yield ["\n".join(logs + [f"Iteration {step}/30 - {('REFINING' if step > 25 else 'FOLDING')}..."])] + [None]*15
-                else:
-                    logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] LATTICE CONVERGENCE ACHIEVED. STABILITY VERIFIED.")
-                    yield ["\n".join(logs)] + [None]*15
+            # Yield progress updates to UI
+            if not frame.get("final", False):
+                yield ["\n".join(logs + [f"Iteration {step}/30 - {('REFINING' if step > 25 else 'FOLDING')}..."])] + [None]*15
+            else:
+                logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] LATTICE CONVERGENCE ACHIEVED. STABILITY VERIFIED.")
+                yield ["\n".join(logs)] + [None]*15
 
         # Final Analysis
         analysis = BiophysicsSuite.analyze_sequence(seq, coords, confidence)
@@ -546,9 +496,9 @@ with gr.Blocks(title="Resonance-Fold Pro") as demo:
                     )
                     folding_mode = gr.Dropdown(
                         label="Structural Generation Strategy", 
-                        choices=["NRC Pure Math & Physics Engine (Default)", "ESMFold (Physical Model)", "Local ESMFold (Standard)", "Hybrid (AI Seed + NRC)"], 
-                        value="NRC Pure Math & Physics Engine (Default)",
-                        info="Pure NRC: φ-based structural seeding | Local ESMFold: High-performance offline inference."
+                        choices=["NRC Pure Math & Physics Engine (Deterministic)"], 
+                        value="NRC Pure Math & Physics Engine (Deterministic)",
+                        info="Pure NRC: φ-based structural seeding. No AI inference involved."
                     )
                     viewer_type = gr.Radio(["Three.js", "3Dmol", "NGL"], label="Visualizer Engine", value="Three.js")
                 with gr.Row():
