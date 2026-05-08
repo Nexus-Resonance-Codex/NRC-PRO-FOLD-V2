@@ -23,6 +23,13 @@ os.environ["MPLCONFIGDIR"] = "/tmp/matplotlib_cache"
 os.environ["XDG_CACHE_HOME"] = "/tmp"
 os.environ["GRADIO_CACHE_DIR"] = "/tmp/gradio_cache"
 
+# Fix for Gradio sharing in read-only environments
+try:
+    if not os.path.exists(".gradio"):
+        os.symlink("/tmp/gradio_cache", ".gradio")
+except Exception:
+    pass
+
 # Add the app directory to sys.path
 app_dir = os.path.dirname(os.path.abspath(__file__))
 if app_dir not in sys.path:
