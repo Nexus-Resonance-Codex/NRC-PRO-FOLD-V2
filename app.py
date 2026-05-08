@@ -271,12 +271,12 @@ def parse_pdb_coords(pdb_str):
 
 def run_nrc_pipeline(seq, viewer_type, folding_mode, ref_pdb_id=None):
     logs = [f"[{datetime.now().strftime('%H:%M:%S')}] INITIALIZING PURE NRC DETERMINISTIC PIPELINE..."]
-    yield ["\n".join(logs)] + [None]*15
+    yield ["\n".join(logs)] + [None]*16
     
     try:
         seq = seq.strip().upper().replace("\n", "").replace(" ", "")
         if not seq: 
-            yield ["[ERROR] EMPTY SEQUENCE"] + [None]*15
+            yield ["[ERROR] EMPTY SEQUENCE"] + [None]*16
             return
         
         # Pure NRC Math Engine
@@ -304,10 +304,10 @@ def run_nrc_pipeline(seq, viewer_type, folding_mode, ref_pdb_id=None):
 
             # Yield progress updates to UI
             if not frame.get("final", False):
-                yield ["\n".join(logs + [f"Iteration {step}/30 - {('REFINING' if step > 25 else 'FOLDING')}..."])] + [None]*15
+                yield ["\n".join(logs + [f"Iteration {step}/30 - {('REFINING' if step > 25 else 'FOLDING')}..."])] + [None]*16
             else:
                 logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] LATTICE CONVERGENCE ACHIEVED. STABILITY VERIFIED.")
-                yield ["\n".join(logs)] + [None]*15
+                yield ["\n".join(logs)] + [None]*16
 
         # Final Analysis
         analysis = BiophysicsSuite.analyze_sequence(seq, coords, confidence)
@@ -323,7 +323,7 @@ def run_nrc_pipeline(seq, viewer_type, folding_mode, ref_pdb_id=None):
         comparison_res = None
         if ref_pdb_id and len(ref_pdb_id.strip()) == 4:
             logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] FETCHING REFERENCE PDB {ref_pdb_id.upper()} FOR VALIDATION...")
-            yield ["\n".join(logs)] + [None]*15
+            yield ["\n".join(logs)] + [None]*16
             # We compare the CA-subset for RMSD consistency
             ca_coords = coords if not all_atom_data else coords[np.array(all_atom_data["atom_types"]) == "CA"]
             comparison_res = BiophysicsSuite.compare_to_native(ref_pdb_id.strip(), ca_coords)
@@ -331,7 +331,7 @@ def run_nrc_pipeline(seq, viewer_type, folding_mode, ref_pdb_id=None):
                 logs.append(f"[WARN] PDB COMPARISON FAILED: {comparison_res['error']}")
             else:
                 logs.append(f"[VALIDATION] RMSD TO NATIVE ({ref_pdb_id.upper()}): {comparison_res['rmsd']:.4f} Å")
-            yield ["\n".join(logs)] + [None]*15
+            yield ["\n".join(logs)] + [None]*16
         
         pdb_text = ReportingSuite.generate_pdb(seq, coords, confidence, **all_atom_data)
         pdb_preview = pdb_text if len(pdb_text) < 50000 else f"{pdb_text[:50000]}\n\n... [TRUNCATED] ..."
@@ -365,7 +365,7 @@ def run_nrc_pipeline(seq, viewer_type, folding_mode, ref_pdb_id=None):
         
         # Summary
         summary_data = [
-            ["Residues", len(seq)], 
+            ["Residues", str(len(seq))], 
             ["Avg Confidence", f"{meta['avg_confidence']:.2f}%"], 
             ["TTT Stability", f"{meta['ttt_stability']:.4f}"],
             ["Resonance Error", f"{meta['resonance_error']:.4f}"],
@@ -382,14 +382,14 @@ def run_nrc_pipeline(seq, viewer_type, folding_mode, ref_pdb_id=None):
         
         logs.append(f"[OK] FOLDING COMPLETE. MANIFOLD STABILIZED.")
         yield [
-            "\n".join(logs), l_fig, m_fig, None, None, None, None, 
+            "\n".join(logs), viewer_html, l_fig, m_fig, None, None, None, None, 
             summary_df, zip_path, pdb_preview, "".join(analysis["dssp"]), 
             analysis["pI"], meta["hash"], coords, analysis, final_meta
         ]
     except Exception as e:
         import traceback
         logs.append(f"[FATAL] {str(e)}")
-        yield ["\n".join(logs)] + [None]*15
+        yield ["\n".join(logs)] + [None]*16
 
 
 def fetch_pdb_logic(query):
@@ -539,6 +539,8 @@ with gr.Blocks(title="Resonance-Fold Pro") as demo:
                 
                 with gr.Tab("Manifold Projection", id="lattice_tab"): 
                     with gr.Row():
+                        viewer_html_out = gr.HTML(label="3D Viewer")
+                    with gr.Row():
                         l_plot = gr.Plot(label="3D Topology")
                         m_plot = gr.Plot(label="φ-Spiral Projection")
                 
@@ -562,7 +564,7 @@ with gr.Blocks(title="Resonance-Fold Pro") as demo:
         run_nrc_pipeline, 
         inputs=[seq_input, viewer_type, folding_mode, ref_pdb_id], 
         outputs=[
-            status_log, l_plot, m_plot, rama_plot, h_plot, ch_plot, conf_plot, 
+            status_log, viewer_html_out, l_plot, m_plot, rama_plot, h_plot, ch_plot, conf_plot, 
             summary_table, export_zip, pdb_code, dssp_out, pi_out, hash_out,
             coords_state, analysis_state, meta_state
         ]
