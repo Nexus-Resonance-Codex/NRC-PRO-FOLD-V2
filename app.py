@@ -310,7 +310,7 @@ def run_nrc_pipeline(seq, viewer_type, folding_mode):
                 esm_coords, esm_plddt = parse_pdb_coords(esm_pdb)
                 if len(esm_coords) == len(seq):
                     logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] ESMFOLD DATA ACQUIRED. Resonance Sync Success.")
-                    if folding_mode in ["ESMFold (Physical Model)", "Local ESMFold (Institutional)"]:
+                    if folding_mode in ["ESMFold (Physical Model)", "Local ESMFold (Standard)"]:
                         coords = esm_coords
                         confidence = esm_plddt
                     else:
@@ -534,7 +534,7 @@ with gr.Blocks(
         gr.HTML("""
             <div style="text-align: center;">
                 <h1>RESONANCE-FOLD PRO</h1>
-                <p style="color: #888; text-transform: uppercase; letter-spacing: 2px;">Advanced φ-Lattice Protein Folding Platform • v2.9.0 • 77,777 Residue Ready</p>
+                <p style="color: #888; text-transform: uppercase; letter-spacing: 2px;">Advanced φ-Lattice Protein Folding Platform • v2.9.0 • Production Ready</p>
             </div>
         """)
 
@@ -555,7 +555,7 @@ with gr.Blocks(
                     )
                     folding_mode = gr.Dropdown(
                         label="Structural Generation Strategy", 
-                        choices=["NRC Geometric Init", "ESMFold (Physical Model)", "Local ESMFold (System)", "Hybrid (AI Seed + NRC)"], 
+                        choices=["NRC Geometric Init", "ESMFold (Physical Model)", "Local ESMFold (Standard)", "Hybrid (AI Seed + NRC)"], 
                         value="Hybrid (AI Seed + NRC)",
                         info="NRC Geometric Init: φ-based structural seeding | Local ESMFold: High-performance offline inference."
                     )

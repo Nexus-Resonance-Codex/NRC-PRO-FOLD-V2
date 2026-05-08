@@ -6,7 +6,7 @@ from typing import Optional
 class LocalESMFold:
     """
     Local ESMFold Implementation for high-performance protein folding.
-    Ensures API-independence for institutional research.
+    Ensures API-independence for independent research.
     """
     
     def __init__(self, model_name: str = "esmfold_v1"):

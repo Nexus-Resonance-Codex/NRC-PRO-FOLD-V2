@@ -5,7 +5,7 @@ from datetime import datetime
 
 class ScientificDeposition:
     """
-    Handles institutional-grade deposition of structural predictions
+    Handles research-grade deposition of structural predictions
     to global scientific databases (Zenodo, ModelArchive).
     """
     
