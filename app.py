@@ -21,6 +21,7 @@ from datetime import datetime
 # Environment configuration
 os.environ["MPLCONFIGDIR"] = "/tmp/matplotlib_cache"
 os.environ["XDG_CACHE_HOME"] = "/tmp"
+os.environ["GRADIO_CACHE_DIR"] = "/tmp/gradio_cache"
 
 # Add the app directory to sys.path
 app_dir = os.path.dirname(os.path.abspath(__file__))
