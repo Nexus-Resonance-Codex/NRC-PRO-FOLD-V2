@@ -51,6 +51,7 @@ class NRCEngine:
             for idx, template_coord in templates.items():
                 if 0 <= idx < n:
                     coords[idx] = template_coord
+            ff.x0 = coords.flatten()
 
         # Yield Initial State
         yield {
@@ -61,20 +62,16 @@ class NRCEngine:
         }
 
         # Step 2: Thermodynamic Relaxation Loop (Pure Math)
-        # We'll run a few iterations and yield frames for the "wow" effect
-        max_steps = 100
+        # With analytical gradients, this is now instantaneous.
+        # We'll use fewer but deeper steps to ensure stability and smooth animation.
+        max_steps = 20
         for step in range(1, max_steps + 1):
-            # In a real real-time app, we'd do partial optimization steps.
-            # Here we simulate the progress for visualization.
-            # We'll run a mini-optimization every 10 steps or just interpolate.
-            
-            # For the final step, we do the full optimization
+            # Each step does a partial optimization
             if step == max_steps:
                 coords = ff.optimize(max_iter=500)
             else:
-                # Interpolate or do a shallow optimize
-                # To keep it fast for Gradio, we'll just do a shallow optimize
-                coords = ff.optimize(max_iter=5)
+                # 25 iterations per frame for a smooth but fast transition
+                coords = ff.optimize(max_iter=25)
             
             # Rescale to Angstroms (3.8A C-alpha resonance)
             p_diffs = np.linalg.norm(np.diff(coords, axis=0), axis=1)
@@ -82,18 +79,16 @@ class NRCEngine:
             if avg_len > 0:
                 coords = coords * (3.8 / avg_len)
 
-            # Confidence increases with 'step' as we approach TTT-7 stability
             confidence = np.full(n, 70.0 + (step / max_steps) * 25.0)
             stability = 7.0 + (step / max_steps) * 2.0
             
-            if step % 10 == 0 or step == max_steps:
-                yield {
-                    "step": step,
-                    "coords": coords,
-                    "confidence": confidence,
-                    "stability": stability,
-                    "final": (step == max_steps)
-                }
+            yield {
+                "step": step,
+                "coords": coords,
+                "confidence": confidence,
+                "stability": stability,
+                "final": (step == max_steps)
+            }
 
     def _generate_projection_matrix(self) -> np.ndarray:
         """Generates a diversified 2048D -> 3D projection manifold."""

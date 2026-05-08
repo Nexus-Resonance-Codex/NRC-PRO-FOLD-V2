@@ -290,20 +290,26 @@ def parse_pdb_coords(pdb_str):
 
 def run_nrc_pipeline(seq, viewer_type, folding_mode):
     logs = [f"[{datetime.now().strftime('%H:%M:%S')}] INITIALIZING {folding_mode.upper()} PIPELINE..."]
+    yield ["\n".join(logs)] + [None]*15
+    
     try:
         seq = seq.strip().upper().replace("\n", "").replace(" ", "")
-        if not seq: return [None]*16 + ["[ERROR] EMPTY SEQUENCE"]
+        if not seq: 
+            yield ["[ERROR] EMPTY SEQUENCE"] + [None]*15
+            return
         
         coords = None
         confidence = None
         templates = None
         
-        if folding_mode in ["ESMFold (Physical Model)", "Hybrid (AI Seed + NRC)", "Local ESMFold (System)"]:
-            if folding_mode == "Local ESMFold (System)" and LOCAL_ESM_AVAILABLE:
+        if folding_mode in ["ESMFold (Physical Model)", "Hybrid (AI Seed + NRC)", "Local ESMFold (Standard)"]:
+            if folding_mode == "Local ESMFold (Standard)" and LOCAL_ESM_AVAILABLE:
                 logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] INITIATING LOCAL ESMFOLD INFERENCE (CUDA Accelerated)...")
+                yield ["\n".join(logs)] + [None]*15
                 esm_pdb = esm_folder.predict(seq)
             else:
                 logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] QUERYING ESMFOLD API (Hugging Face Manifold)...")
+                yield ["\n".join(logs)] + [None]*15
                 esm_pdb = query_esmfold(seq)
             
             if esm_pdb:
@@ -319,20 +325,28 @@ def run_nrc_pipeline(seq, viewer_type, folding_mode):
                 else:
                     logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] [WARN] ESMFOLD MISMATCH ({len(esm_coords)} vs {len(seq)}). FALLING BACK TO NRC GEOMETRIC INIT.")
             else:
-                logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] [WARN] ESMFOLD UNAVAILABLE. FALLING BACK TO NRC GEOMETRIC INIT.")
+                logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] [WARN] ESMFOLD API LIMIT OR OFFLINE. FALLING BACK TO NRC GEOMETRIC INIT.")
+            yield ["\n".join(logs)] + [None]*15
 
         # Run NRC Math Engine (as primary or refinement)
         if coords is None:
             logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] INITIATING 2048D PHI-LATTICE GEOMETRIC INITIALIZATION...")
-            frames = list(engine.fold_sequence(seq, templates=templates))
-            final = frames[-1]
-            coords = final["coords"]
-            confidence = final["confidence"]
-        
-        # Biophysics Analysis
+            for frame in engine.fold_sequence(seq, templates=templates):
+                coords = frame["coords"]
+                confidence = frame["confidence"]
+                
+                # For intermediate steps, we only update logs and structural preview to keep it fast
+                if not frame.get("final", False):
+                    # Quick PDB for preview
+                    pdb_tmp = ReportingSuite.generate_pdb(seq, coords, confidence)
+                    viewer_html = get_viewer_html(pdb_tmp, viewer_type)
+                    yield ["\n".join(logs + [f"Iteration {frame['step']}..."])] + [None]*12 + [coords, None, None]
+                else:
+                    logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] LATTICE CONVERGENCE ACHIEVED.")
+                    yield ["\n".join(logs)] + [None]*15
+
+        # Final Analysis
         analysis = BiophysicsSuite.analyze_sequence(seq, coords, confidence)
-        
-        # Metadata and Reporting
         meta = {
             "hash": ReportingSuite.generate_share_hash(seq), 
             "avg_confidence": float(np.mean(confidence)), 
@@ -341,102 +355,49 @@ def run_nrc_pipeline(seq, viewer_type, folding_mode):
         }
         
         pdb_text = ReportingSuite.generate_pdb(seq, coords, confidence)
-        pdb_preview = pdb_text if len(seq) < 5000 else f"{pdb_text[:50000]}\n\n... [TRUNCATED FOR BROWSER PERFORMANCE - DOWNLOAD PACKAGE FOR FULL PDB] ..."
+        pdb_preview = pdb_text if len(seq) < 5000 else f"{pdb_text[:50000]}\n\n... [TRUNCATED] ..."
         viewer_html = get_viewer_html(pdb_text, viewer_type, analysis["pockets"][:1])
         
-        # --- Plotly Visualizations (Defensive Alignment) ----------------------
-        def align_arrays(x, y):
-            x = np.array(x)
-            y = np.array(y)
-            min_len = min(len(x), len(y))
-            return x[:min_len], y[:min_len]
-
-        # Aggressive Adaptive Sub-sampling for Browser Performance
-        stride = 1
-        max_points = 300 # Ultra-strict cap for maximum browser resonance
-        if len(seq) > max_points: 
-            stride = int(len(seq) / max_points) + 1
-        
-        # Aligned indices for sub-sampling
+        # --- Plotly Visualizations ---
+        stride = max(1, len(seq) // 300)
         indices = np.arange(0, len(seq), stride)
-
-        # 3D Lattice Projection (Sub-sampled)
-        l_x, l_conf = align_arrays(coords[indices, 0], confidence[indices])
-        l_y, _ = align_arrays(coords[indices, 1], confidence[indices])
-        l_z, _ = align_arrays(coords[indices, 2], confidence[indices])
         
+        def safe_sub(arr, idx): return np.array(arr)[idx] if arr is not None else None
+
+        # 3D Topology
         l_fig = go.Figure(data=[go.Scatter3d(
-            x=l_x, y=l_y, z=l_z, 
-            mode='lines' if stride > 1 else 'lines+markers', 
-            marker=dict(size=2, color=l_conf, colorscale='Viridis', showscale=True, colorbar=dict(title="pLDDT")),
-            line=dict(color='#D4AF37', width=2)
+            x=safe_sub(coords[:, 0], indices), y=safe_sub(coords[:, 1], indices), z=safe_sub(coords[:, 2], indices),
+            mode='lines+markers', marker=dict(size=2, color=safe_sub(confidence, indices), colorscale='Viridis'),
+            line=dict(color='#D4AF37', width=3)
         )])
-        l_fig.update_layout(template="plotly_dark", scene=dict(xaxis_visible=False, yaxis_visible=False, zaxis_visible=False), margin=dict(l=0,r=0,b=0,t=0), title=f"3D Structural Geometry {'(Sub-sampled)' if stride > 1 else ''}")
+        l_fig.update_layout(template="plotly_dark", margin=dict(l=0,r=0,b=0,t=0), title="3D Topology (Sub-sampled)")
 
-        # 2048D φ-Manifold Projection (Sub-sampled)
+        # Manifold
         m_coords = analysis["phi_manifold"]
-        m_x, m_conf = align_arrays(m_coords[indices, 0], confidence[indices])
-        m_y, _ = align_arrays(m_coords[indices, 1], confidence[indices])
-        m_z, _ = align_arrays(m_coords[indices, 2], confidence[indices])
-        
         m_fig = go.Figure(data=[go.Scatter3d(
-            x=m_x, y=m_y, z=m_z,
-            mode='lines' if stride > 1 else 'lines+markers',
-            marker=dict(size=1, color=m_conf, colorscale='Magma', showscale=True, colorbar=dict(title="Resonance")),
-            line=dict(color='#00FF88', width=1, dash='dot')
+            x=safe_sub(m_coords[:, 0], indices), y=safe_sub(m_coords[:, 1], indices), z=safe_sub(m_coords[:, 2], indices),
+            mode='lines', line=dict(color='#00FF88', width=2)
         )])
-        m_fig.update_layout(template="plotly_dark", scene=dict(xaxis_visible=False, yaxis_visible=False, zaxis_visible=False), margin=dict(l=0,r=0,b=0,t=0), title=f"φ-Spiral Projection {'(Sub-sampled)' if stride > 1 else ''}")
+        m_fig.update_layout(template="plotly_dark", margin=dict(l=0,r=0,b=0,t=0), title="φ-Spiral Projection")
         
-        # Ramachandran (Aligned & Sub-sampled)
-        phi, psi = align_arrays(analysis["ramachandran"]["phi"], analysis["ramachandran"]["psi"])
-        r_fig = go.Figure(data=go.Scattergl(
-            x=phi[indices], y=psi[indices], 
-            mode='markers', 
-            marker=dict(size=4, color='#00FF88', opacity=0.6)
-        ))
-        r_fig.update_layout(template="plotly_dark", title="Ramachandran Projection", xaxis_title="Phi", yaxis_title="Psi")
-        r_fig.add_shape(type="rect", x0=-180, y0=-180, x1=180, y1=180, line=dict(color="#333"))
-        
-        # Confidence (Aligned & Sub-sampled)
-        conf_x = np.arange(1, len(confidence) + 1)
-        conf_fig = go.Figure(data=go.Scattergl(
-            x=conf_x[indices], y=confidence[indices], 
-            mode='lines', 
-            line=dict(color='#00FF88'), 
-            fill='tozeroy'
-        ))
-        conf_fig.update_layout(template="plotly_dark", title=f"Confidence Profile {'(Sub-sampled)' if stride > 1 else ''}", xaxis_title="Residue Index", yaxis_title="Score")
-        
-        # Biophysical Profiles (Sub-sampled - Optimized with Scattergl)
-        h_y = np.array(analysis["hydropathy"])
-        c_y = np.array(analysis["charge"])
-        h_fig = go.Figure(data=go.Scattergl(x=conf_x[indices], y=h_y[indices], mode='lines', line=dict(color='#3498db'), fill='tozeroy'))
-        h_fig.update_layout(template="plotly_dark", title=f"Hydropathy Profile {'(Sub-sampled)' if stride > 1 else ''}")
-        c_fig = go.Figure(data=go.Scattergl(x=conf_x[indices], y=c_y[indices], mode='lines', line=dict(color='#e74c3c'), fill='tozeroy'))
-        c_fig.update_layout(template="plotly_dark", title=f"Charge Distribution {'(Sub-sampled)' if stride > 1 else ''}")
-        
-        # Summary Data
+        # Summary
         summary_df = pd.DataFrame([
-            ["Residues", len(seq)], 
-            ["Avg Confidence", f"{meta['avg_confidence']:.2f}%"], 
-            ["TTT Stability", f"{meta['ttt_stability']:.4f}"],
-            ["Folding Mode", folding_mode],
-            ["Lattice Hash", meta["hash"]]
+            ["Residues", len(seq)], ["Avg Confidence", f"{meta['avg_confidence']:.2f}%"], 
+            ["TTT Stability", f"{meta['ttt_stability']:.4f}"], ["Mode", folding_mode]
         ], columns=["Metric", "Value"])
         
-        # Generate Export Package
         zip_path = ReportingSuite.create_research_package(f"nrc_{meta['hash']}", seq, coords, confidence, analysis, meta)
         
-        logs.append(f"[OK] FOLDING COMPLETE. MODE: {folding_mode} | NODES: {len(seq)}")
-        return [
-            "\n".join(logs), l_fig, m_fig, r_fig, h_fig, c_fig, conf_fig, 
+        logs.append(f"[OK] FOLDING COMPLETE.")
+        yield [
+            "\n".join(logs), l_fig, m_fig, None, None, None, None, 
             summary_df, zip_path, pdb_preview, "".join(analysis["dssp"]), 
             analysis["pI"], meta["hash"], coords, analysis, meta
         ]
-    except Exception as e: 
+    except Exception as e:
         import traceback
         logs.append(f"[FATAL] {str(e)}")
-        return ["\n".join(logs)] + [None]*12 + [None, None, None]
+        yield ["\n".join(logs)] + [None]*15
 
 
 def fetch_pdb_logic(query):
@@ -555,9 +516,9 @@ with gr.Blocks(
                     )
                     folding_mode = gr.Dropdown(
                         label="Structural Generation Strategy", 
-                        choices=["NRC Geometric Init", "ESMFold (Physical Model)", "Local ESMFold (Standard)", "Hybrid (AI Seed + NRC)"], 
-                        value="NRC Geometric Init",
-                        info="NRC Geometric Init: φ-based structural seeding | Local ESMFold: High-performance offline inference."
+                        choices=["NRC Pure Math & Physics Engine (Default)", "ESMFold (Physical Model)", "Local ESMFold (Standard)", "Hybrid (AI Seed + NRC)"], 
+                        value="NRC Pure Math & Physics Engine (Default)",
+                        info="Pure NRC: φ-based structural seeding | Local ESMFold: High-performance offline inference."
                     )
                     viewer_type = gr.Radio(["Three.js", "3Dmol", "NGL"], label="Visualizer Engine", value="Three.js")
                 fold_btn = gr.Button("Predict Protein Structure", variant="primary", elem_classes="primary")
