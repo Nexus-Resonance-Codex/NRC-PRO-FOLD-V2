@@ -1,130 +1,118 @@
 import numpy as np
 from scipy.optimize import minimize
-from scipy.spatial.distance import pdist
 
 class NRCForcefield:
     def __init__(self, N):
         self.N = N
-        self.phi = (1 + np.sqrt(5)) / 2
+        self.phi = (1 + np.sqrt(5)) / 2  # Golden ratio
+
+        # Physical constants
+        self.CA_CA_BOND_LENGTH = 3.8  # Target bond length in Å
+        self.SIGMA = 3.38              # Minimum at 3.8A
+        self.EPSILON = 5.0              # Stronger repulsion
+        self.K_BOND = 5000.0            # Very rigid backbone
+        self.RG_TARGET = 17.0           # Target Rg for N=189
+        self.MODULAR_SCALE = 3.8        # Scale TTT-7 to Angstrom level
+
         self.x0 = self.spherical_fibonacci_initialization(N)
 
     def spherical_fibonacci_initialization(self, N):
-        """Generates a 3D spherical distribution of points to avoid 2D collapse."""
-        # Note: indices i go from 1 to N
+        """Generates a 3D spherical distribution of points."""
         indices = np.arange(1, N + 1)
         z = 1 - (2 * indices - 1) / N
-        # phi_angle = 2 * pi / phi^2
         phi_angle = 2 * np.pi / (self.phi**2)
         theta = phi_angle * indices
-        
+
         x = np.sqrt(1 - z**2) * np.cos(theta)
         y = np.sqrt(1 - z**2) * np.sin(theta)
-        # Scale to a reasonable starting radius for a protein (e.g., 10-20A)
-        # But for optimization, 1.0 radius is fine as a starting manifold.
-        return np.column_stack((x, y, z)).flatten()
 
-    def qrt_damping_vectorized(self, d):
-        """Quantum Residue Turbulence (QRT) Damping potential."""
-        # V(d) = sin(phi*sqrt(2)*51.85*d) * exp(-d^2/phi) + cos(pi/phi*d)
-        k = self.phi * np.sqrt(2) * 51.85
-        return np.sin(k * d) * np.exp(-d**2 / self.phi) + np.cos(np.pi / self.phi * d)
-
-    def qrt_damping_derivative(self, d):
-        """Derivative of QRT Damping potential w.r.t. distance d."""
-        k = self.phi * np.sqrt(2) * 51.85
-        # d/dd [sin(kd) * exp(-d^2/phi)] = k*cos(kd)*exp(-d^2/phi) + sin(kd)*exp(-d^2/phi)*(-2d/phi)
-        term1_deriv = (k * np.cos(k * d) - (2 * d / self.phi) * np.sin(k * d)) * np.exp(-d**2 / self.phi)
-        # d/dd [cos(pi/phi * d)] = -pi/phi * sin(pi/phi * d)
-        term2_deriv = -(np.pi / self.phi) * np.sin(np.pi / self.phi * d)
-        return term1_deriv + term2_deriv
-
-    def ttt_7_penalty_vectorized(self, d):
-        """Trageser Tensor Theorem (TTT-7) Modular Stability potential."""
-        d_int = np.floor(np.abs(d) * 1618).astype(int)
-        mod_val = d_int % 9
-        penalty = np.zeros_like(d, dtype=float)
-        voids = (mod_val == 0) | (mod_val == 3) | (mod_val == 6) | (mod_val == 9)
-        penalty[voids] = 1.0 / self.phi
-        stable = (mod_val == 7)
-        penalty[stable] = -1.0
-        return penalty
-
-    def ttt_7_penalty_derivative(self, d):
-        """Derivative of TTT-7 penalty. Since it is step-like, we use a smooth approximation for gradients."""
-        # Smooth approximation of the modular stability manifold
-        return -np.sin(2 * np.pi * d * 1618 / 9.0)
-
-    def lennard_jones_potential_vectorized(self, d_scaled):
-        """Standard Steric Clash Prevention (Lennard-Jones 12-6)."""
-        eps = 1e-9
-        inv_d6 = (d_scaled + eps)**-6
-        return 4 * (inv_d6**2 - inv_d6)
-
-    def lennard_jones_derivative(self, d_scaled):
-        """Derivative of Lennard-Jones w.r.t. d_scaled."""
-        eps = 1e-9
-        # d/dx [4(x^-12 - x^-6)] = 4(-12x^-13 + 6x^-7)
-        return 4 * (-12 * (d_scaled + eps)**-13 + 6 * (d_scaled + eps)**-7)
+        # Start as a sphere of radius RG_TARGET
+        coords_3d = np.column_stack((x, y, z)) * self.RG_TARGET
+        return coords_3d.flatten()
 
     def energy_and_gradient(self, coords_flat):
-        """Combined objective and gradient function for performance."""
         coords = coords_flat.reshape(-1, 3)
-        n = len(coords)
+        n = self.N
         grad = np.zeros_like(coords)
         total_e = 0.0
-        
-        # We'll use a slightly more explicit loop or broad-casting for gradients
-        # to avoid the memory overhead of a full N^2 distance matrix if N is very large,
-        # but for N=200, broadcasting is fine.
+
+        # 1. Harmonic Bonds (Backbone)
+        diff_backbone = coords[1:] - coords[:-1]
+        d_backbone = np.linalg.norm(diff_backbone, axis=1) + 1e-9
+
+        bond_e = self.K_BOND * np.sum((d_backbone - self.CA_CA_BOND_LENGTH)**2)
+        total_e += bond_e
+
+        # Gradient of bond energy
+        bond_mag = 2 * self.K_BOND * (d_backbone - self.CA_CA_BOND_LENGTH) / d_backbone
+
+        grad[:-1] += -bond_mag[:, np.newaxis] * diff_backbone
+        grad[1:] += bond_mag[:, np.newaxis] * diff_backbone
+
+        # 2. Non-bonded Interactions (LJ + TTT-7 + QRT + Confinement)
         diff = coords[:, np.newaxis, :] - coords[np.newaxis, :, :]
         dists = np.sqrt(np.sum(diff**2, axis=-1) + 1e-9)
-        
-        # Upper triangle indices to avoid double counting and self-interaction
-        iu = np.triu_indices(n, k=1)
+
+        iu = np.triu_indices(n, k=2)  # Non-adjacent pairs
         d = dists[iu]
+
+        # Lennard-Jones
+        s_r = self.SIGMA / d
+        s_r6 = s_r**6
+        s_r12 = s_r6**2
+        lj_e = self.EPSILON * (s_r12 - s_r6)
+        total_e += np.sum(lj_e)
+
+        lj_grad_mag = self.EPSILON * (-12 * s_r12 / d + 6 * s_r6 / d)
+
+        # TTT-7 Resonance (scaled to Ångström level)
+        ttt_factor = 1618.0 / (9.0 * self.MODULAR_SCALE)
+        ttt_e = -np.cos(2 * np.pi * d * ttt_factor)
+        total_e += np.sum(ttt_e)
+
+        ttt_grad_mag = 2 * np.pi * ttt_factor * np.sin(2 * np.pi * d * ttt_factor)
+
+        # QRT Damping (Global attractive potential to ensure globular fold)
+        qrt_e = (d / self.phi)**2 * 0.01
+        total_e += np.sum(qrt_e)
+        qrt_grad_mag = 2 * d / (self.phi**2) * 0.01
+
+        # Global Confinement Potential (Prevents collapse)
+        # rg = sqrt(mean(squared distances from centroid))
+        mean_coords = np.mean(coords, axis=0)
+        rel_coords = coords - mean_coords
+        sum_sq_dist = np.sum(rel_coords**2)
+        rg = np.sqrt(sum_sq_dist / n)
         
-        # 1. Lennard-Jones
-        d_scaled = d / 3.8
-        total_e += np.sum(self.lennard_jones_potential_vectorized(d_scaled))
-        lj_grad_mag = self.lennard_jones_derivative(d_scaled) / 3.8
-        
-        # 2. QRT
-        total_e += np.sum(self.qrt_damping_vectorized(d))
-        qrt_grad_mag = self.qrt_damping_derivative(d)
-        
-        # 3. TTT-7
-        total_e += np.sum(self.ttt_7_penalty_vectorized(d))
-        ttt_grad_mag = self.ttt_7_penalty_derivative(d)
-        
-        # Combine magnitudes
-        total_grad_mag = lj_grad_mag + qrt_grad_mag + ttt_grad_mag
-        
-        # Project magnitudes onto vectors: grad_i += (V'(d) * (ri - rj) / d)
-        # Using the diff matrix we computed earlier
-        grad_matrix = np.zeros((n, n, 3))
-        # unit_vectors = diff / dists[:, :, np.newaxis]
-        # But we only need the upper triangle
+        conf_e = 1.0 * (rg - self.RG_TARGET)**2
+        total_e += conf_e
+
+        # dE/dxi = dE/drg * drg/dxi
+        # drg/dxi = (1/rg) * (1/n) * (xi - x_mean)
+        dE_drg = 2.0 * (rg - self.RG_TARGET)
+        conf_grad = (dE_drg / (rg * n + 1e-9)) * rel_coords
+        grad += conf_grad
+
+        # Combine Non-bonded Gradients
+        total_mag = lj_grad_mag + ttt_grad_mag + qrt_grad_mag
+
         mag_matrix = np.zeros((n, n))
-        mag_matrix[iu] = total_grad_mag / d
-        
-        # Apply symmetry: grad_ij = -grad_ji
-        mag_matrix = mag_matrix - mag_matrix.T
-        
-        # Final gradient for each particle: sum over j of (mag_ij * (ri - rj))
-        grad = np.sum(mag_matrix[:, :, np.newaxis] * diff, axis=1)
-        
+        mag_matrix[iu] = total_mag / d
+        mag_matrix = mag_matrix + mag_matrix.T
+
+        grad += np.sum(mag_matrix[:, :, np.newaxis] * diff, axis=1)
+
         return total_e, grad.flatten()
 
     def optimize(self, max_iter=500):
-        """Relaxes the 3D structure using L-BFGS-B with analytical gradients."""
         res = minimize(
-            self.energy_and_gradient, 
-            self.x0, 
-            method='L-BFGS-B', 
+            self.energy_and_gradient,
+            self.x0,
+            method='L-BFGS-B',
             jac=True,
             options={'maxiter': max_iter, 'disp': False}
         )
-        self.x0 = res.x # Save state for next resonance cycle
+        self.x0 = res.x
         return res.x.reshape(-1, 3)
 
 if __name__ == "__main__":
@@ -132,7 +120,9 @@ if __name__ == "__main__":
     n_residues = 189
     ff = NRCForcefield(n_residues)
     start = time.time()
-    final_coords = ff.optimize(max_iter=100)
+    final_coords = ff.optimize(max_iter=500)
     print(f"Optimized 189 AA in {time.time() - start:.2f}s")
-    print(f"Optimized coordinates shape: {final_coords.shape}")
-
+    
+    mean_pos = np.mean(final_coords, axis=0)
+    rg = np.sqrt(np.mean(np.sum((final_coords - mean_pos)**2, axis=1)))
+    print(f"Final Radius of Gyration: {rg:.2f} Å")

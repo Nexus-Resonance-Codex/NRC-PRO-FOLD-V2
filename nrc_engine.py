@@ -45,7 +45,7 @@ class NRCEngine:
         
         # Step 1: Initial 3D Distribution (Spherical Fibonacci to avoid 2D collapse)
         # We start with the 3D seed directly
-        coords = ff.x0.reshape(-1, 3) * 10.0 # Scale to a starting 10A sphere
+        coords = ff.x0.reshape(-1, 3) # Use the forcefield's initialization directly
         
         if templates:
             for idx, template_coord in templates.items():
@@ -73,11 +73,8 @@ class NRCEngine:
                 # 25 iterations per frame for a smooth but fast transition
                 coords = ff.optimize(max_iter=25)
             
-            # Rescale to Angstroms (3.8A C-alpha resonance)
-            p_diffs = np.linalg.norm(np.diff(coords, axis=0), axis=1)
-            avg_len = np.mean(p_diffs) if len(p_diffs) > 0 else 1.0
-            if avg_len > 0:
-                coords = coords * (3.8 / avg_len)
+            # Use the optimized coordinates directly
+            # The forcefield already enforces the 3.8A bond length.
 
             confidence = np.full(n, 70.0 + (step / max_steps) * 25.0)
             stability = 7.0 + (step / max_steps) * 2.0
