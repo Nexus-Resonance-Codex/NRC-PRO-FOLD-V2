@@ -556,7 +556,7 @@ with gr.Blocks(
                     folding_mode = gr.Dropdown(
                         label="Structural Generation Strategy", 
                         choices=["NRC Geometric Init", "ESMFold (Physical Model)", "Local ESMFold (Standard)", "Hybrid (AI Seed + NRC)"], 
-                        value="Hybrid (AI Seed + NRC)",
+                        value="NRC Geometric Init",
                         info="NRC Geometric Init: φ-based structural seeding | Local ESMFold: High-performance offline inference."
                     )
                     viewer_type = gr.Radio(["Three.js", "3Dmol", "NGL"], label="Visualizer Engine", value="Three.js")
