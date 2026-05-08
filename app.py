@@ -581,6 +581,7 @@ if __name__ == "__main__":
     demo.launch(
         server_name="0.0.0.0", 
         server_port=3697, 
+        share=True,
         show_error=True,
         allowed_paths=["."],
         theme=RESONANCE_THEME,
