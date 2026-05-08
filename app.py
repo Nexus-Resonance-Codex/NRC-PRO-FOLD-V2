@@ -1,4 +1,21 @@
+import os
 import sys
+
+# Core Environment Overrides for Read-Only FS
+os.environ["GRADIO_DIR"] = "/tmp/gradio_meta"
+os.environ["GRADIO_CACHE_DIR"] = "/tmp/gradio_cache"
+os.environ["MPLCONFIGDIR"] = "/tmp/matplotlib_cache"
+os.environ["XDG_CACHE_HOME"] = "/tmp"
+
+# Immediate Directory Creation
+for d in ["/tmp/gradio_meta", "/tmp/gradio_cache", "/tmp/matplotlib_cache"]:
+    os.makedirs(d, exist_ok=True)
+
+# Add the app directory to sys.path
+app_dir = os.path.dirname(os.path.abspath(__file__))
+if app_dir not in sys.path:
+    sys.path.insert(0, app_dir)
+
 try:
     import audioop
 except ImportError:
@@ -17,28 +34,6 @@ import plotly.graph_objects as go
 import plotly.express as px
 import gradio as gr
 from datetime import datetime
-
-# Environment configuration
-os.environ["MPLCONFIGDIR"] = "/tmp/matplotlib_cache"
-os.environ["XDG_CACHE_HOME"] = "/tmp"
-os.environ["GRADIO_CACHE_DIR"] = "/tmp/gradio_cache"
-os.environ["GRADIO_SHARE_LINK_NAME"] = "nrc-pro-fold"
-
-# Fix for Gradio sharing in read-only environments
-try:
-    if not os.path.exists("/tmp/gradio_cache"):
-        os.makedirs("/tmp/gradio_cache", exist_ok=True)
-    if not os.path.exists(".gradio"):
-        # Use a temporary directory for the .gradio metadata
-        os.environ["GRADIO_DIR"] = "/tmp/gradio_meta"
-        os.makedirs("/tmp/gradio_meta", exist_ok=True)
-except Exception:
-    pass
-
-# Add the app directory to sys.path
-app_dir = os.path.dirname(os.path.abspath(__file__))
-if app_dir not in sys.path:
-    sys.path.insert(0, app_dir)
 
 # --- Initialization ──────────────────────────────────────────────────────────
 
