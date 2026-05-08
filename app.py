@@ -22,11 +22,16 @@ from datetime import datetime
 os.environ["MPLCONFIGDIR"] = "/tmp/matplotlib_cache"
 os.environ["XDG_CACHE_HOME"] = "/tmp"
 os.environ["GRADIO_CACHE_DIR"] = "/tmp/gradio_cache"
+os.environ["GRADIO_SHARE_LINK_NAME"] = "nrc-pro-fold"
 
 # Fix for Gradio sharing in read-only environments
 try:
+    if not os.path.exists("/tmp/gradio_cache"):
+        os.makedirs("/tmp/gradio_cache", exist_ok=True)
     if not os.path.exists(".gradio"):
-        os.symlink("/tmp/gradio_cache", ".gradio")
+        # Use a temporary directory for the .gradio metadata
+        os.environ["GRADIO_DIR"] = "/tmp/gradio_meta"
+        os.makedirs("/tmp/gradio_meta", exist_ok=True)
 except Exception:
     pass
 
