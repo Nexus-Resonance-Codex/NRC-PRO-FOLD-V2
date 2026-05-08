@@ -41,7 +41,7 @@ class NRCEngine:
             raise ValueError(f"Sequence length {n} exceeds limit of {self.MAX_SEQUENCE_LENGTH} AA.")
 
         # Initialize NRC Forcefield for this sequence
-        ff = NRCForcefield(n)
+        ff = NRCForcefield(sequence)
         
         # Step 1: Initial 3D Distribution (Spherical Fibonacci to avoid 2D collapse)
         # We start with the 3D seed directly

@@ -288,7 +288,7 @@ def parse_pdb_coords(pdb_str):
                 continue
     return np.array(coords), np.array(plddt)
 
-def run_nrc_pipeline(seq, viewer_type, folding_mode):
+def run_nrc_pipeline(seq, viewer_type, folding_mode, ref_pdb_id=None):
     logs = [f"[{datetime.now().strftime('%H:%M:%S')}] INITIALIZING {folding_mode.upper()} PIPELINE..."]
     yield ["\n".join(logs)] + [None]*15
     
@@ -351,8 +351,21 @@ def run_nrc_pipeline(seq, viewer_type, folding_mode):
             "hash": ReportingSuite.generate_share_hash(seq), 
             "avg_confidence": float(np.mean(confidence)), 
             "ttt_stability": float(analysis.get("ttt_stability", 7.0)),
+            "resonance_error": float(analysis.get("resonance_error", 0.0)),
             "folding_mode": folding_mode
         }
+        
+        # PDB Comparison if ID provided
+        comparison_res = None
+        if ref_pdb_id and len(ref_pdb_id.strip()) == 4:
+            logs.append(f"[{datetime.now().strftime('%H:%M:%S')}] FETCHING REFERENCE PDB {ref_pdb_id.upper()} FOR VALIDATION...")
+            yield ["\n".join(logs)] + [None]*15
+            comparison_res = BiophysicsSuite.compare_to_native(ref_pdb_id.strip(), coords)
+            if "error" in comparison_res:
+                logs.append(f"[WARN] PDB COMPARISON FAILED: {comparison_res['error']}")
+            else:
+                logs.append(f"[VALIDATION] RMSD TO NATIVE ({ref_pdb_id.upper()}): {comparison_res['rmsd']:.4f} Å")
+            yield ["\n".join(logs)] + [None]*15
         
         pdb_text = ReportingSuite.generate_pdb(seq, coords, confidence)
         pdb_preview = pdb_text if len(seq) < 5000 else f"{pdb_text[:50000]}\n\n... [TRUNCATED] ..."
@@ -381,10 +394,17 @@ def run_nrc_pipeline(seq, viewer_type, folding_mode):
         m_fig.update_layout(template="plotly_dark", margin=dict(l=0,r=0,b=0,t=0), title="φ-Spiral Projection")
         
         # Summary
-        summary_df = pd.DataFrame([
-            ["Residues", len(seq)], ["Avg Confidence", f"{meta['avg_confidence']:.2f}%"], 
-            ["TTT Stability", f"{meta['ttt_stability']:.4f}"], ["Mode", folding_mode]
-        ], columns=["Metric", "Value"])
+        summary_data = [
+            ["Residues", len(seq)], 
+            ["Avg Confidence", f"{meta['avg_confidence']:.2f}%"], 
+            ["TTT Stability", f"{meta['ttt_stability']:.4f}"],
+            ["Resonance Error", f"{meta['resonance_error']:.4f}"],
+            ["Mode", folding_mode]
+        ]
+        if comparison_res and "rmsd" in comparison_res:
+            summary_data.append(["RMSD to Native", f"{comparison_res['rmsd']:.4f} Å"])
+            
+        summary_df = pd.DataFrame(summary_data, columns=["Metric", "Value"])
         
         zip_path = ReportingSuite.create_research_package(f"nrc_{meta['hash']}", seq, coords, confidence, analysis, meta)
         
@@ -477,15 +497,7 @@ head_scripts = """
 <script src="https://unpkg.com/ngl@2.0.0-dev.37/dist/ngl.js"></script>
 """
 
-with gr.Blocks(
-    title="Resonance-Fold Pro",
-    head="""
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-        <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
-    """,
-    css=RESONANCE_CSS,
-    theme=RESONANCE_THEME
-) as demo:
+with gr.Blocks(title="Resonance-Fold Pro") as demo:
     # State Manifolds
     coords_state = gr.State()
     analysis_state = gr.State()
@@ -521,6 +533,8 @@ with gr.Blocks(
                         info="Pure NRC: φ-based structural seeding | Local ESMFold: High-performance offline inference."
                     )
                     viewer_type = gr.Radio(["Three.js", "3Dmol", "NGL"], label="Visualizer Engine", value="Three.js")
+                with gr.Row():
+                    ref_pdb_id = gr.Textbox(label="Reference PDB ID (Optional)", placeholder="e.g., 1AKI", max_lines=1)
                 fold_btn = gr.Button("Predict Protein Structure", variant="primary", elem_classes="primary")
 
 
@@ -574,7 +588,7 @@ with gr.Blocks(
     
     fold_btn.click(
         run_nrc_pipeline, 
-        inputs=[seq_input, viewer_type, folding_mode], 
+        inputs=[seq_input, viewer_type, folding_mode, ref_pdb_id], 
         outputs=[
             status_log, l_plot, m_plot, rama_plot, h_plot, ch_plot, conf_plot, 
             summary_table, export_zip, pdb_code, dssp_out, pi_out, hash_out,
@@ -597,5 +611,8 @@ if __name__ == "__main__":
         allowed_paths=["."],
         theme=RESONANCE_THEME,
         css=RESONANCE_CSS,
-        head=head_scripts
+        head=head_scripts + """
+            <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+            <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+        """
     )
