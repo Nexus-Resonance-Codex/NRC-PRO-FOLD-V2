@@ -339,14 +339,18 @@ def run_nrc_pipeline(seq, viewer_type, folding_mode, ref_pdb_id=None):
         
         # --- Plotly Visualizations ---
         stride = max(1, len(seq) // 300)
-        indices = np.arange(0, len(seq), stride)
         
         def safe_sub(arr, idx): return np.array(arr)[idx] if arr is not None else None
 
-        # 3D Topology
+        # 3D Topology - use ca_coords for the backbone trace
+        plot_coords = coords if not all_atom_data else coords[np.array(all_atom_data["atom_types"]) == "CA"]
+        plot_conf = confidence if not all_atom_data else confidence[np.array(all_atom_data["atom_types"]) == "CA"]
+        
+        indices = np.arange(0, len(plot_coords), stride)
+
         l_fig = go.Figure(data=[go.Scatter3d(
-            x=safe_sub(coords[:, 0], indices), y=safe_sub(coords[:, 1], indices), z=safe_sub(coords[:, 2], indices),
-            mode='lines+markers', marker=dict(size=2, color=safe_sub(confidence, indices), colorscale='Viridis'),
+            x=safe_sub(plot_coords[:, 0], indices), y=safe_sub(plot_coords[:, 1], indices), z=safe_sub(plot_coords[:, 2], indices),
+            mode='lines+markers', marker=dict(size=2, color=safe_sub(plot_conf, indices), colorscale='Viridis'),
             line=dict(color='#D4AF37', width=3)
         )])
         l_fig.update_layout(template="plotly_dark", margin=dict(l=0,r=0,b=0,t=0), title="3D Topology (Sub-sampled)")
