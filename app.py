@@ -3,6 +3,7 @@ import sys
 
 # Core Environment Overrides for Read-Only FS
 os.environ["GRADIO_DIR"] = "/tmp/gradio_meta"
+os.environ["GRADIO_ROOT"] = "/tmp"
 os.environ["GRADIO_CACHE_DIR"] = "/tmp/gradio_cache"
 os.environ["MPLCONFIGDIR"] = "/tmp/matplotlib_cache"
 os.environ["XDG_CACHE_HOME"] = "/tmp"
