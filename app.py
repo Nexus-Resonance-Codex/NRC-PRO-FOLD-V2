@@ -8,6 +8,11 @@ os.environ["GRADIO_CACHE_DIR"] = "/tmp/gradio_cache"
 os.environ["MPLCONFIGDIR"] = "/tmp/matplotlib_cache"
 os.environ["XDG_CACHE_HOME"] = "/tmp"
 
+# Force Writable CWD on Hugging Face
+if os.environ.get("SPACE_ID"):
+    print(f"φ^∞ NRC: Running on Hugging Face ({os.environ.get('SPACE_ID')}). Redirecting CWD to /tmp.")
+    os.chdir("/tmp")
+
 # Immediate Directory Creation
 for d in ["/tmp/gradio_meta", "/tmp/gradio_cache", "/tmp/matplotlib_cache"]:
     os.makedirs(d, exist_ok=True)
