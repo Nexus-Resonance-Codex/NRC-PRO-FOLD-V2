@@ -1,16 +1,17 @@
 ---
-title: Resonance Fold Pro
+title: Resonance Fold
 emoji: 🧬
 colorFrom: indigo
 colorTo: purple
 sdk: docker
 app_file: app.py
+app_port: 3697
 pinned: false
 ---
 
-# Resonance-Fold Pro: φ-Lattice Folding
+# Resonance-Fold: φ-Lattice Folding
 
-Welcome to the **Resonance-Fold Pro** portal. This is a production deployment of the **Nexus Resonance Codex** protein folding engine.
+Welcome to the **Resonance-Fold** portal. This is a deployment of the **Nexus Resonance Codex** protein folding engine.
 
 ### 🔭 Capabilities
 - **Deterministic IDP Folding**: 100% mathematical resonance logic for disordered proteins.

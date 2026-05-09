@@ -70,7 +70,7 @@ RESONANCE_CSS = r"""
 body { background-color: var(--nrc-obsidian); }
 .main-header { background: #000; padding: 2rem; border-bottom: 2px solid var(--nrc-gold); text-align: center; }
 .main-header h1 { color: var(--nrc-gold) !important; letter-spacing: 4px; font-weight: 900; }
-.premium-card { background: rgba(20,20,20,0.8) !important; border: 1px solid #222 !important; border-radius: 20px !important; padding: 1.5rem !important; margin-bottom: 1rem; }
+.card { background: rgba(20,20,20,0.8) !important; border: 1px solid #222 !important; border-radius: 20px !important; padding: 1.5rem !important; margin-bottom: 1rem; }
 .log-console { background: #000 !important; color: var(--nrc-green) !important; font-family: 'JetBrains Mono', monospace !important; border: 1px solid #333 !important; }
 .stat-box { text-align: center; border-right: 1px solid #333; padding: 10px; }
 .stat-box:last-child { border-right: none; }
@@ -483,7 +483,7 @@ head_scripts = """
 <script src="https://unpkg.com/ngl@2.0.0-dev.37/dist/ngl.js"></script>
 """
 
-with gr.Blocks(title="Resonance-Fold Pro") as demo:
+with gr.Blocks(title="Resonance-Fold") as demo:
     # State Manifolds
     coords_state = gr.State()
     analysis_state = gr.State()
@@ -562,8 +562,8 @@ with gr.Blocks(title="Resonance-Fold Pro") as demo:
                     with gr.Row():
                         export_zip = gr.File(label="Download Research Package (.zip)")
                         pdb_code = gr.Code(label="PDB Source", language="markdown")
-                    with gr.Column(elem_classes="premium-card"):
-                        gr.Markdown("### Deposition & Archiving")
+                    with gr.Column(elem_classes="card"):
+                        gr.Markdown("# Resonance-Fold: φ-Lattice Engine")
                         deposit_btn = gr.Button("DEPOT TO ZENODO / MODELARCHIVE (DRAFT)", variant="secondary")
                         deposit_out = gr.Code(label="Submission Manifest", language="json")
 
